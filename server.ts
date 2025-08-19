@@ -97,11 +97,15 @@ app.post('/api/chat', async (req, res) => {
         const normalizedQuestion = normalizePersian(question);
         const contextEntries = await findRelevantContext(normalizedQuestion);
 
+        // Build the prompt for Gemini
+        let prompt = `شما یک دستیار هوشمند برای گروه نرم‌افزاری پیوست هستید. به سوال زیر پاسخ دهید:\n\nسوال کاربر: "${normalizedQuestion}"\n\n`;
+
         if (contextEntries.length > 0) {
-            // DEBUG: Bypass Gemini and return direct DB results.
-            const combinedAnswer = contextEntries
-                .map(e => e.answer)
-                .join('\n\n---\n\n');
+            const contextText = contextEntries
+                .map(e => `سوال مرتبط در پایگاه دانش: ${e.question}\nپاسخ مرتبط: ${e.answer}`)
+                .join('\n\n');
+            
+            prompt += `از اطلاعات زیر که از پایگاه دانش داخلی استخراج شده، برای ارائه یک پاسخ دقیق و کامل استفاده کن:\n\n---\n${contextText}\n---\n\nپاسخ شما باید خلاصه، مفید و بر اساس اطلاعات ارائه‌شده باشد. اگر اطلاعات برای پاسخگویی کافی نیست، این موضوع را ذکر کرده و با دانش عمومی خود به بهترین شکل ممکن پاسخ دهید.`;
 
             // Update hits count for found entries.
             const entryIds = contextEntries.map(e => e.id);
@@ -110,20 +114,26 @@ app.post('/api/chat', async (req, res) => {
                 SET hits = hits + 1
                 WHERE id = ANY(${entryIds as any});
             `.catch(err => console.error("Failed to update hits count:", err));
-
-            res.json({ answer: combinedAnswer, sources: contextEntries });
-        
         } else {
-            // DEBUG: If no context found, return a message indicating direct search failed.
-            res.json({ 
-                answer: "موردی در پایگاه دانش برای این سوال یافت نشد. (جستجوی مستقیم بدون دخالت هوش مصنوعی)",
-                sources: [] 
-            });
+            prompt += `برای این سوال، اطلاعات مستقیمی در پایگاه دانش یافت نشد. با دانش عمومی خود به بهترین شکل ممکن پاسخ دهید.`;
         }
 
+        // Call Gemini API
+        const geminiResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+              systemInstruction: "شما یک دستیار هوشمند، مفید و مودب برای گروه نرم‌افزاری پیوست هستید. پاسخ‌های شما باید به زبان فارسی، واضح و دقیق باشد.",
+            }
+        });
+        
+        const answer = geminiResponse.text;
+
+        res.json({ answer, sources: contextEntries });
+
     } catch (error: any) {
-        console.error('Error during direct database search:', error.message);
-        res.status(500).json({ error: 'Failed to search the knowledge base.' });
+        console.error('Error processing chat request:', error.message);
+        res.status(500).json({ error: 'Failed to process chat request.' });
     }
 });
 

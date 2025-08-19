@@ -46,22 +46,23 @@ const KB_FILE_PATH = path.join(__dirname, '..', 'knowledge-base.json');
 
 async function seedDatabase() {
   console.log('Starting database seeding process for similarity search...');
+  
+  const client = await sql.connect();
 
   try {
     // 1. Check for database connection string
     if (!process.env.POSTGRES_URL) {
       throw new Error('POSTGRES_URL environment variable is not set. Please check your .env file.');
     }
-    const client = await sql.connect();
     console.log('Database connection successful.');
 
     // 2. Enable the pg_trgm extension for similarity search
-    await client.query('CREATE EXTENSION IF NOT EXISTS pg_trgm;');
+    await client.sql`CREATE EXTENSION IF NOT EXISTS pg_trgm;`;
     console.log('PostgreSQL extension "pg_trgm" is enabled.');
 
     // 3. Create the knowledge_base table (dropping the old one if it exists to ensure a clean slate)
-    await client.query('DROP TABLE IF EXISTS knowledge_base;');
-    await client.query(`
+    await client.sql`DROP TABLE IF EXISTS knowledge_base;`;
+    await client.sql`
       CREATE TABLE knowledge_base (
         id TEXT PRIMARY KEY,
         question TEXT NOT NULL,
@@ -76,11 +77,11 @@ async function seedDatabase() {
         "documentUrl" TEXT,
         "imageUrl" TEXT
       );
-    `);
+    `;
     console.log('Table "knowledge_base" created successfully.');
     
     // 4. Create a GIN index for fast trigram-based similarity search
-    await client.query('CREATE INDEX trgm_idx ON knowledge_base USING gin (question gin_trgm_ops);');
+    await client.sql`CREATE INDEX trgm_idx ON knowledge_base USING gin (question gin_trgm_ops);`;
     console.log('GIN index on "question" for trigram search created.');
 
 
@@ -92,35 +93,20 @@ async function seedDatabase() {
     // 6. Insert data into the database
     console.log('Inserting entries into the database...');
     for (const entry of entries) {
-      await client.query(
-        `
+      await client.sql`
         INSERT INTO knowledge_base (id, question, answer, type, system, "hasVideo", "hasDocument", "hasImage", hits, "videoUrl", "documentUrl", "imageUrl")
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES (${entry.id}, ${normalizePersian(entry.question)}, ${normalizePersian(entry.answer)}, ${entry.type}, ${normalizePersian(entry.system)}, ${entry.hasVideo || false}, ${entry.hasDocument || false}, ${entry.hasImage || false}, ${entry.hits || 0}, ${entry.videoUrl || null}, ${entry.documentUrl || null}, ${entry.imageUrl || null})
         ON CONFLICT (id) DO NOTHING;
-        `,
-        [
-          entry.id,
-          normalizePersian(entry.question),
-          normalizePersian(entry.answer),
-          entry.type,
-          normalizePersian(entry.system),
-          entry.hasVideo || false,
-          entry.hasDocument || false,
-          entry.hasImage || false,
-          entry.hits || 0,
-          entry.videoUrl || null,
-          entry.documentUrl || null,
-          entry.imageUrl || null
-        ]
-      );
+      `;
     }
 
-    await client.release();
     console.log(`✅ Seeding complete. Successfully processed ${entries.length} entries.`);
 
   } catch (error) {
     console.error('❌ An error occurred during database seeding:', error);
     (process as any).exit(1);
+  } finally {
+    await client.release();
   }
 }
 
