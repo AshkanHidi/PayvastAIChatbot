@@ -4,7 +4,6 @@ import { config } from 'dotenv';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { exit } from 'process';
 
 // Load environment variables from .env file
 config();
@@ -103,7 +102,7 @@ async function seedDatabase() {
 
   } catch (error) {
     console.error('❌ An error occurred during database seeding:', error);
-    exit(1);
+    process.exit(1);
   }
 }
 
